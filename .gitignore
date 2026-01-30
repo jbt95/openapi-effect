@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.generated
+test/.generated
+.DS_Store
+.env
+.idea
+.vscode

@@ -1,0 +1,27 @@
+# Source files
+src/
+test/
+fixtures/
+
+# Config files
+tsconfig.json
+vitest.config.ts
+.prettierrc.json
+
+# Development
+node_modules/
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.github/
+
+# Documentation (included via files field in package.json, but ignore others)
+plan.md
+AGENTS.md

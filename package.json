@@ -1,0 +1,65 @@
+{
+  "name": "openapi-effect",
+  "version": "1.0.0",
+  "description": "Generate Effect Schema and Effect-based HTTP clients from OpenAPI 3.0/3.1 specs",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    }
+  },
+  "bin": {
+    "openapi-effect": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "postbuild": "node -e \"const fs=require('fs'); const content=fs.readFileSync('dist/cli.js','utf8'); if(!content.startsWith('#!/usr/bin/env node')) { fs.writeFileSync('dist/cli.js', '#!/usr/bin/env node\\n' + content) }\"",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "openapi",
+    "swagger",
+    "effect",
+    "schema",
+    "codegen",
+    "typescript",
+    "api",
+    "client",
+    "http",
+    "rest"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^10.1.0",
+    "effect": "^3.10.0",
+    "ts-morph": "^24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "prettier": "^3.2.5",
+    "tsup": "^8.5.1",
+    "typescript": "^5.4.5",
+    "vitest": "^2.0.5"
+  },
+  "packageManager": "pnpm@10.23.0"
+}
