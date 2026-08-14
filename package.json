@@ -1,6 +1,6 @@
 {
   "name": "openapi-effect",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Generate Effect Schema and Effect-based HTTP clients from OpenAPI 3.0/3.1 specs",
   "type": "module",
   "main": "./dist/index.js",
