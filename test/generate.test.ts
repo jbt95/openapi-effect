@@ -27,7 +27,7 @@ describe("generateFromOpenApi", () => {
     expect(result.schemas).toContain("Schema.NullOr")
     expect(result.schemas).toContain("Schema.Literal")
     expect(result.schemas).toContain("Schema.Array")
-    expect(result.schemas).toContain("Schema.Record({ key: Schema.String")
+    expect(result.schemas).toContain("Schema.Record(Schema.String")
     expect(result.client).toContain("listPets")
     expect(result.client).toContain("searchUsers")
     expect(result.client).toContain("updateUser")

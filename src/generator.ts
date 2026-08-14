@@ -31,9 +31,9 @@ type SchemaContext = {
 type ResponseKind = "json" | "text" | "empty" | "binary" | "stream"
 
 const defaultFormatMap: Record<string, string> = {
-  uuid: "Schema.UUID",
-  "date-time": "Schema.Date",
-  date: "Schema.Date"
+  uuid: "Schema.String.check(Schema.isUUID())",
+  "date-time": "Schema.DateFromString",
+  date: "Schema.DateFromString"
 }
 
 const resolveFormatMap = (options?: GenerateOptions) => ({
@@ -145,7 +145,7 @@ const formatStruct = (fields: string[], extra?: string) => {
 ${formattedFields.join(",\n")}
 }`
   if (extra) {
-    return `Schema.Struct(${objectLiteral}, ${extra})`
+    return `Schema.StructWithRest(Schema.Struct(${objectLiteral}), [${extra}])`
   }
   return `Schema.Struct(${objectLiteral})`
 }
@@ -167,19 +167,19 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
 
   if (schema.enum && schema.enum.length > 0) {
     const literals = schema.enum.map((value) => JSON.stringify(value)).join(", ")
-    const base = `Schema.Literal(${literals})`
+    const base = `Schema.Literals([${literals}])`
     return applyNullable(base)
   }
 
   if (schema.oneOf && schema.oneOf.length > 0) {
     const members = schema.oneOf.map((member) => schemaToExpression(member, context))
-    const base = `Schema.Union(${members.join(", ")})`
+    const base = `Schema.Union([${members.join(", ")}])`
     return applyNullable(base)
   }
 
   if (schema.anyOf && schema.anyOf.length > 0) {
     const members = schema.anyOf.map((member) => schemaToExpression(member, context))
-    const base = `Schema.Union(${members.join(", ")})`
+    const base = `Schema.Union([${members.join(", ")}])`
     return applyNullable(base)
   }
 
@@ -198,7 +198,7 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
     const elseExpr = schema.else ? schemaToExpression(schema.else, context) : undefined
     context.warnings.push("Conditional schemas (if/then/else) are approximated.")
     if (thenExpr && elseExpr) {
-      return applyNullable(`Schema.Union(${thenExpr}, ${elseExpr})`)
+      return applyNullable(`Schema.Union([${thenExpr}, ${elseExpr}])`)
     }
     if (thenExpr) return applyNullable(thenExpr)
     if (elseExpr) return applyNullable(elseExpr)
@@ -221,7 +221,7 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
     const members = nonNull.map((type) =>
       schemaToExpression({ ...schema, type, nullable: false }, context)
     )
-    const base = members.length === 1 ? members[0] : `Schema.Union(${members.join(", ")})`
+    const base = members.length === 1 ? members[0] : `Schema.Union([${members.join(", ")}])`
     return hasNull || schema.nullable ? `Schema.NullOr(${base})` : base
   }
 
@@ -261,7 +261,7 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
   }
 
   if (type === "integer") {
-    const base = "Schema.Number.pipe(Schema.int())"
+    const base = "Schema.Number.check(Schema.isInt())"
     return withFormatWarning(base)
   }
 
@@ -279,20 +279,17 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
       if (Array.isArray(items)) {
         const tupleExpressions = items.map((item) => schemaToExpression(item, context))
         context.warnings.push("Tuple array items are approximated with Schema.Tuple.")
-        const tupleBody = tupleExpressions.join(", ")
-        const base = `Schema.Tuple(${tupleBody})`
+        const base = `Schema.Tuple([${tupleExpressions.join(", ")}])`
         return withFormatWarning(base)
       }
 
       if (items === false) {
-        const tupleBody = prefixExpressions.join(", ")
-        const base = `Schema.Tuple(${tupleBody})`
+        const base = `Schema.Tuple([${prefixExpressions.join(", ")}])`
         return withFormatWarning(base)
       }
 
       if (!items) {
-        const tupleBody = prefixExpressions.join(", ")
-        const base = `Schema.Tuple(${tupleBody})`
+        const base = `Schema.Tuple([${prefixExpressions.join(", ")}])`
         return withFormatWarning(base)
       }
 
@@ -301,7 +298,7 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
           const base = "Schema.Array(Schema.Unknown)"
           return withFormatWarning(base)
         }
-        const base = `Schema.Tuple([${prefixExpressions.join(", ")}], Schema.Unknown)`
+        const base = `Schema.TupleWithRest(Schema.Tuple([${prefixExpressions.join(", ")}]), Schema.Unknown)`
         return withFormatWarning(base)
       }
 
@@ -311,12 +308,12 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
       }
 
       const restSchema = schemaToExpression(items, context)
-      const base = `Schema.Tuple([${prefixExpressions.join(", ")}], ${restSchema})`
+      const base = `Schema.TupleWithRest(Schema.Tuple([${prefixExpressions.join(", ")}]), ${restSchema})`
       return withFormatWarning(base)
     }
 
     if (items === false) {
-      const base = "Schema.Tuple()"
+      const base = "Schema.Tuple([])"
       return withFormatWarning(base)
     }
 
@@ -369,7 +366,7 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
         ? undefined
         : patternSchemas.length === 1
           ? patternSchemas[0]
-          : `Schema.Union(${patternSchemas.join(", ")})`
+          : `Schema.Union([${patternSchemas.join(", ")}])`
 
     const additional =
       schema.additionalProperties !== undefined
@@ -397,15 +394,15 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
       ? "Schema.Unknown"
       : recordValueSchemas.length === 1
         ? recordValueSchemas[0]
-        : `Schema.Union(${recordValueSchemas.join(", ")})`
+        : `Schema.Union([${recordValueSchemas.join(", ")}])`
 
     if (!hasProperties && recordValue) {
-      const base = `Schema.Record({ key: ${keySchema}, value: ${recordValue} })`
+      const base = `Schema.Record(${keySchema}, ${recordValue})`
       return withFormatWarning(base)
     }
 
     const recordExpr = recordValue
-      ? `Schema.Record({ key: ${keySchema}, value: ${recordValue} })`
+      ? `Schema.Record(${keySchema}, ${recordValue})`
       : undefined
     const base = formatStruct(fields, recordExpr)
     return withFormatWarning(base)
@@ -644,11 +641,11 @@ const generateClient = (
     ].join("\n"),
     true
   )
-  addTypeAlias("SchemaType<S extends Schema.Schema.Any>", "Schema.Schema.Type<S>")
+  addTypeAlias("SchemaType<S extends Schema.Codec<unknown>>", "S[\"Type\"]")
   addTypeAlias("ResponseKind", '"json" | "text" | "empty" | "binary" | "stream"')
   addTypeAlias("StreamValue", "ReadableStream<Uint8Array> | null")
   addTypeAlias("BinaryValue", "ArrayBuffer")
-  addTypeAlias("ResponseEntry", "{ schema: Schema.Schema.Any; kind: ResponseKind }")
+  addTypeAlias("ResponseEntry", "{ schema: Schema.Codec<unknown>; kind: ResponseKind }")
   addTypeAlias(
     "ResponseValue<T extends ResponseEntry>",
     'T["kind"] extends "stream" ? StreamValue : T["kind"] extends "binary" ? BinaryValue : SchemaType<T["schema"]>'
@@ -888,9 +885,9 @@ ${securityFields}
       "return timeoutMs === undefined",
       "  ? effect",
       "  : effect.pipe(",
-      "      Effect.timeoutFail({",
+      "      Effect.timeoutOrElse({",
       "        duration: timeoutMs,",
-      '        onTimeout: () => ({ _tag: "TimeoutError" as const, timeoutMs })',
+      '        orElse: () => Effect.fail({ _tag: "TimeoutError" as const, timeoutMs })',
       "      })",
       "    )"
     ]
@@ -1014,14 +1011,14 @@ ${securityFields}
   })
   addFunction({
     name: "decodeInput",
-    typeParameters: ["S extends Schema.Schema.Any"],
+    typeParameters: ["S extends Schema.Codec<unknown>"],
     parameters: [
       { name: "schema", type: "S" },
       { name: "input", type: "unknown" }
     ],
-    returnType: "Effect.Effect<Schema.Schema.Type<S>, ClientError, unknown>",
+    returnType: "Effect.Effect<S[\"Type\"], ClientError, unknown>",
     statements: [
-      "return Schema.decodeUnknown(schema)(input).pipe(",
+      "return Schema.decodeUnknownEffect(schema)(input).pipe(",
       '  Effect.mapError((error) => ({ _tag: "InputError" as const, error }))',
       ")"
     ]
@@ -1069,7 +1066,7 @@ ${securityFields}
       '            ? Effect.fail({ _tag: "HttpError" as const, response: decoded as ResponseUnion<Exclude<TError, undefined>> })',
       "            : Effect.succeed(decoded as ResponseUnion<TSuccess>)",
       "        })()",
-      "      : Schema.decodeUnknown(schema)(raw).pipe(",
+      "      : Schema.decodeUnknownEffect(schema)(raw).pipe(",
       "          Effect.map((value) => ({ status, value })),",
       '          Effect.mapError((error) => ({ _tag: "ResponseDecodeError" as const, status, error }))',
       "        ).pipe(",

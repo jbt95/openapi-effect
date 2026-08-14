@@ -44,11 +44,11 @@ export type ClientError = | { _tag: "InputError"; error: unknown }
   | { _tag: "ResponseDecodeError"; status: number; error: unknown }
   | { _tag: "InterceptorError"; stage: "request" | "response"; error: unknown }
   | { _tag: "TimeoutError"; timeoutMs: number };
-type SchemaType<S extends Schema.Schema.Any> = Schema.Schema.Type<S>;
+type SchemaType<S extends Schema.Codec<unknown>> = S["Type"];
 type ResponseKind = "json" | "text" | "empty" | "binary" | "stream";
 type StreamValue = ReadableStream<Uint8Array> | null;
 type BinaryValue = ArrayBuffer;
-type ResponseEntry = { schema: Schema.Schema.Any; kind: ResponseKind };
+type ResponseEntry = { schema: Schema.Codec<unknown>; kind: ResponseKind };
 type ResponseValue<T extends ResponseEntry> = T["kind"] extends "stream" ? StreamValue : T["kind"] extends "binary" ? BinaryValue : SchemaType<T["schema"]>;
 type ResponseSpec = Record<string, ResponseEntry>;
 type ResponseUnion<T extends ResponseSpec> = {
@@ -202,9 +202,9 @@ function applyTimeout<A, E, R>(effect: Effect.Effect<A, E, R>, timeoutMs?: numbe
   return timeoutMs === undefined
     ? effect
     : effect.pipe(
-        Effect.timeoutFail({
+        Effect.timeoutOrElse({
           duration: timeoutMs,
-          onTimeout: () => ({ _tag: "TimeoutError" as const, timeoutMs })
+          orElse: () => Effect.fail({ _tag: "TimeoutError" as const, timeoutMs })
         })
       )
 }
@@ -306,8 +306,8 @@ function executeRequest(fetcher: typeof fetch, method: string, url: string, head
   })
 }
 
-function decodeInput<S extends Schema.Schema.Any>(schema: S, input: unknown): Effect.Effect<Schema.Schema.Type<S>, ClientError, unknown> {
-  return Schema.decodeUnknown(schema)(input).pipe(
+function decodeInput<S extends Schema.Codec<unknown>>(schema: S, input: unknown): Effect.Effect<S["Type"], ClientError, unknown> {
+  return Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError((error) => ({ _tag: "InputError" as const, error }))
   )
 }
@@ -349,7 +349,7 @@ function decodeResponse<TSuccess extends ResponseSpec, TError extends ResponseSp
               ? Effect.fail({ _tag: "HttpError" as const, response: decoded as ResponseUnion<Exclude<TError, undefined>> })
               : Effect.succeed(decoded as ResponseUnion<TSuccess>)
           })()
-        : Schema.decodeUnknown(schema)(raw).pipe(
+        : Schema.decodeUnknownEffect(schema)(raw).pipe(
             Effect.map((value) => ({ status, value })),
             Effect.mapError((error) => ({ _tag: "ResponseDecodeError" as const, status, error }))
           ).pipe(
@@ -378,20 +378,20 @@ export const GetUserByIdInput = Schema.Struct({
 
 export type GetUserByIdInput = SchemaType<typeof GetUserByIdInput>;
 
-export const GetUserByIdResponseStatus200 = Schema.Struct({
+export const GetUserByIdResponseStatus200 = Schema.StructWithRest(Schema.Struct({
     id: Schema.String,
     name: Schema.String,
-    age: Schema.optional(Schema.NullOr(Schema.Number.pipe(Schema.int()))),
-    status: Schema.Literal("active", "disabled", "pending"),
+    age: Schema.optional(Schema.NullOr(Schema.Number.check(Schema.isInt()))),
+    status: Schema.Literals(["active", "disabled", "pending"]),
     tags: Schema.optional(Schema.Array(Schema.String)),
-    metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
-    preferences: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown }))
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
+    metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    preferences: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
 export const GetUserByIdResponseStatus204 = Schema.Undefined;
-export const GetUserByIdResponseStatus404 = Schema.Struct({
+export const GetUserByIdResponseStatus404 = Schema.StructWithRest(Schema.Struct({
     message: Schema.String,
     code: Schema.optional(Schema.String)
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
 const GetUserByIdSuccessSchemas = {
     "200": { schema: GetUserByIdResponseStatus200, kind: "json" },
     "204": { schema: GetUserByIdResponseStatus204, kind: "empty" },
@@ -409,28 +409,28 @@ export const UpdateUserInput = Schema.Struct({
     path: Schema.Struct({
       userId: Schema.String
     }),
-    body: Schema.Struct({
+    body: Schema.StructWithRest(Schema.Struct({
       name: Schema.String,
-      age: Schema.optional(Schema.NullOr(Schema.Number.pipe(Schema.int()))),
-      status: Schema.optional(Schema.Literal("active", "disabled", "pending"))
-    }, Schema.Record({ key: Schema.String, value: Schema.Union() }))
+      age: Schema.optional(Schema.NullOr(Schema.Number.check(Schema.isInt()))),
+      status: Schema.optional(Schema.Literals(["active", "disabled", "pending"]))
+    }), [Schema.Record(Schema.String, Schema.Union([]))])
   });
 
 export type UpdateUserInput = SchemaType<typeof UpdateUserInput>;
 
-export const UpdateUserResponseStatus200 = Schema.Struct({
+export const UpdateUserResponseStatus200 = Schema.StructWithRest(Schema.Struct({
     id: Schema.String,
     name: Schema.String,
-    age: Schema.optional(Schema.NullOr(Schema.Number.pipe(Schema.int()))),
-    status: Schema.Literal("active", "disabled", "pending"),
+    age: Schema.optional(Schema.NullOr(Schema.Number.check(Schema.isInt()))),
+    status: Schema.Literals(["active", "disabled", "pending"]),
     tags: Schema.optional(Schema.Array(Schema.String)),
-    metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
-    preferences: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown }))
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
-export const UpdateUserResponseStatus400 = Schema.Struct({
+    metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    preferences: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
+export const UpdateUserResponseStatus400 = Schema.StructWithRest(Schema.Struct({
     message: Schema.String,
     code: Schema.optional(Schema.String)
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
 const UpdateUserSuccessSchemas = {
     "200": { schema: UpdateUserResponseStatus200, kind: "json" },
   } as const;
@@ -443,13 +443,13 @@ export type UpdateUserError = ResponseUnion<typeof UpdateUserErrorSchemas>;
 export type UpdateUserResponse = UpdateUserSuccess | UpdateUserError;
 export type UpdateUserFailure = HttpError<typeof UpdateUserErrorSchemas>;
 
-export const ListPetsResponseStatus200 = Schema.Array(Schema.Union(Schema.Struct({
-    type: Schema.Literal("cat"),
+export const ListPetsResponseStatus200 = Schema.Array(Schema.Union([Schema.StructWithRest(Schema.Struct({
+    type: Schema.Literals(["cat"]),
     meows: Schema.Boolean
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown })), Schema.Struct({
-    type: Schema.Literal("dog"),
+  }), [Schema.Record(Schema.String, Schema.Unknown)]), Schema.StructWithRest(Schema.Struct({
+    type: Schema.Literals(["dog"]),
     barks: Schema.Boolean
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }))));
+  }), [Schema.Record(Schema.String, Schema.Unknown)])]));
 const ListPetsSuccessSchemas = {
     "200": { schema: ListPetsResponseStatus200, kind: "json" },
   } as const;
@@ -460,33 +460,33 @@ export type ListPetsResponse = ListPetsSuccess | ListPetsError;
 export type ListPetsFailure = never;
 
 export const SearchUsersInput = Schema.Struct({
-    body: Schema.Struct({
+    body: Schema.StructWithRest(Schema.Struct({
       term: Schema.String,
-      filter: Schema.optional(Schema.NullOr(Schema.Union(Schema.String, Schema.Number.pipe(Schema.int())))),
+      filter: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Number.check(Schema.isInt())]))),
       tags: Schema.optional(Schema.Array(Schema.String)),
-      status: Schema.optional(Schema.Literal("active", "disabled", "pending")),
-      range: Schema.optional(Schema.Struct({
+      status: Schema.optional(Schema.Literals(["active", "disabled", "pending"])),
+      range: Schema.optional(Schema.StructWithRest(Schema.Struct({
         min: Schema.optional(Schema.Number),
         max: Schema.optional(Schema.Number)
-      }, Schema.Record({ key: Schema.String, value: Schema.Unknown })))
-    }, Schema.Record({ key: Schema.String, value: Schema.Unknown }))
+      }), [Schema.Record(Schema.String, Schema.Unknown)]))
+    }), [Schema.Record(Schema.String, Schema.Unknown)])
   });
 
 export type SearchUsersInput = SchemaType<typeof SearchUsersInput>;
 
-export const SearchUsersResponseStatus200 = Schema.Struct({
-    results: Schema.Array(Schema.Struct({
+export const SearchUsersResponseStatus200 = Schema.StructWithRest(Schema.Struct({
+    results: Schema.Array(Schema.StructWithRest(Schema.Struct({
       id: Schema.String,
       name: Schema.String,
-      age: Schema.optional(Schema.NullOr(Schema.Number.pipe(Schema.int()))),
-      status: Schema.Literal("active", "disabled", "pending"),
+      age: Schema.optional(Schema.NullOr(Schema.Number.check(Schema.isInt()))),
+      status: Schema.Literals(["active", "disabled", "pending"]),
       tags: Schema.optional(Schema.Array(Schema.String)),
-      metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
-      preferences: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown }))
-    }, Schema.Record({ key: Schema.String, value: Schema.Unknown }))),
+      metadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+      preferences: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
+    }), [Schema.Record(Schema.String, Schema.Unknown)])),
     next: Schema.optional(Schema.NullOr(Schema.String)),
-    facets: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Array(Schema.String) }))
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
+    facets: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String)))
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
 const SearchUsersSuccessSchemas = {
     "200": { schema: SearchUsersResponseStatus200, kind: "json" },
   } as const;
@@ -512,12 +512,12 @@ export const CreateNoteInput = Schema.Struct({
 
 export type CreateNoteInput = SchemaType<typeof CreateNoteInput>;
 
-export const CreateNoteResponseStatus201 = Schema.Struct({
+export const CreateNoteResponseStatus201 = Schema.StructWithRest(Schema.Struct({
     id: Schema.String,
     body: Schema.String,
-    meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Union() })),
+    meta: Schema.optional(Schema.Record(Schema.String, Schema.Union([]))),
     tags: Schema.optional(Schema.Array(Schema.String))
-  }, Schema.Record({ key: Schema.String, value: Schema.Unknown }));
+  }), [Schema.Record(Schema.String, Schema.Unknown)]);
 const CreateNoteSuccessSchemas = {
     "201": { schema: CreateNoteResponseStatus201, kind: "json" },
   } as const;

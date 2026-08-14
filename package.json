@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^10.1.0",
-    "effect": "^3.10.0",
+    "effect": "4.0.0-rc.109",
     "ts-morph": "^24.0.0"
   },
   "devDependencies": {

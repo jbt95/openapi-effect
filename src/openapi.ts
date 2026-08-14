@@ -209,7 +209,7 @@ const resolveServerUrl = (server: OpenApiServer): string => {
 export const loadOpenApi = async (input: string): Promise<OpenApiSpec> => {
   const parser = new SwaggerParser()
 
-  return (await parser.dereference(input)) as OpenApiSpec
+  return (await parser.parse(input)) as OpenApiSpec
 }
 
 export const normalizeOpenApi = (spec: OpenApiSpec): NormalizedSpec => {

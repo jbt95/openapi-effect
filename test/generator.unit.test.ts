@@ -43,8 +43,8 @@ describe("generateFromSpec", () => {
 
     const result = generateFromSpec(spec)
 
-    expect(result.schemas).toContain("export const UserId = Schema.UUID")
-    expect(result.schemas).toContain("export const CreatedAt = Schema.Date")
+    expect(result.schemas).toContain("export const UserId = Schema.String.check(Schema.isUUID())")
+    expect(result.schemas).toContain("export const CreatedAt = Schema.DateFromString")
     expect(result.schemas).toContain("export const Custom = Schema.String")
     expect(result.warnings.some((warning) => warning.includes("Unsupported schema format"))).toBe(
       true
@@ -87,7 +87,7 @@ describe("generateFromSpec", () => {
 
     expect(result.schemas).toContain("export const NullableString = Schema.NullOr(Schema.String)")
     expect(result.schemas).toContain(
-      "export const StringOrInt = Schema.Union(Schema.String, Schema.Number.pipe(Schema.int()))"
+      "export const StringOrInt = Schema.Union([Schema.String, Schema.Number.check(Schema.isInt())])"
     )
     expect(result.schemas).toContain('export const ConstStatus = Schema.Literal("active")')
   })
@@ -119,11 +119,11 @@ describe("generateFromSpec", () => {
     const result = generateFromSpec(spec)
 
     expect(result.schemas).toContain(
-      "export const TupleRest = Schema.Tuple([Schema.String, Schema.Number.pipe(Schema.int())], Schema.Boolean)"
+      "export const TupleRest = Schema.TupleWithRest(Schema.Tuple([Schema.String, Schema.Number.check(Schema.isInt())]), Schema.Boolean)"
     )
-    expect(result.schemas).toContain("export const TupleFixed = Schema.Tuple(Schema.String)")
+    expect(result.schemas).toContain("export const TupleFixed = Schema.Tuple([Schema.String])")
     expect(result.schemas).toContain(
-      "export const TupleItemsArray = Schema.Tuple(Schema.String, Schema.Number.pipe(Schema.int()))"
+      "export const TupleItemsArray = Schema.Tuple([Schema.String, Schema.Number.check(Schema.isInt())])"
     )
     expect(result.warnings.some((warning) => warning.includes("Tuple array items"))).toBe(true)
   })
@@ -150,10 +150,10 @@ describe("generateFromSpec", () => {
     const result = generateFromSpec(spec)
 
     expect(result.schemas).toContain(
-      "export const Conditional = Schema.Union(Schema.String, Schema.Number.pipe(Schema.int()))"
+      "export const Conditional = Schema.Union([Schema.String, Schema.Number.check(Schema.isInt())])"
     )
     expect(result.schemas).toContain(
-      "export const Unevaluated = Schema.Record({ key: Schema.String, value: Schema.String })"
+      "export const Unevaluated = Schema.Record(Schema.String, Schema.String)"
     )
     expect(result.warnings.some((warning) => warning.includes("Conditional schemas"))).toBe(true)
     expect(result.warnings.some((warning) => warning.includes("unevaluatedProperties"))).toBe(true)
@@ -190,7 +190,7 @@ describe("generateFromSpec", () => {
 
     expect(result.schemas).toContain("export const TaggedObject = Schema.Struct")
     expect(result.schemas).toContain(
-      "Schema.Record({ key: Schema.UUID, value: Schema.Union(Schema.String, Schema.Number.pipe(Schema.int())) })"
+      "Schema.Record(Schema.String.check(Schema.isUUID()), Schema.Union([Schema.String, Schema.Number.check(Schema.isInt())]))"
     )
     expect(result.schemas).toContain("export const EncodedPayload = Schema.String")
     expect(result.warnings.some((warning) => warning.includes("patternProperties"))).toBe(true)
