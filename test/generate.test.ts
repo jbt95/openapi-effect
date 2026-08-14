@@ -4,6 +4,8 @@ import { generateFromOpenApi } from "../src/index.js"
 
 const fixturePath = fileURLToPath(new URL("../fixtures/simple.json", import.meta.url))
 const complexFixturePath = fileURLToPath(new URL("../fixtures/complex.json", import.meta.url))
+const jiraSpecUrl =
+  "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json?_v=1.8516.81"
 
 describe("generateFromOpenApi", () => {
   it("generates schema and client outputs", async () => {
@@ -36,4 +38,15 @@ describe("generateFromOpenApi", () => {
       result.warnings.some((warning) => warning.includes("only JSON and multipart/form-data"))
     ).toBe(true)
   })
+
+  it.skipIf(!process.env.RUN_REMOTE_SMOKE_TESTS)(
+    "generates a client from the Jira OpenAPI specification",
+    async () => {
+      const result = await generateFromOpenApi(jiraSpecUrl)
+
+      expect(result.schemas).toContain("export const ")
+      expect(result.client).toContain("export const makeClient")
+    },
+    300_000
+  )
 })
