@@ -390,20 +390,21 @@ const schemaToExpression = (schema: OpenApiSchema | undefined, context: SchemaCo
     if (recordValueSchemas.length === 0 && additional === undefined) {
       recordValueSchemas.push("Schema.Unknown")
     }
-    const recordValue = recordValueSchemas.includes("Schema.Unknown")
-      ? "Schema.Unknown"
-      : recordValueSchemas.length === 1
-        ? recordValueSchemas[0]
-        : `Schema.Union([${recordValueSchemas.join(", ")}])`
+    const recordValue =
+      recordValueSchemas.length === 0
+        ? undefined
+        : recordValueSchemas.includes("Schema.Unknown")
+          ? "Schema.Unknown"
+          : recordValueSchemas.length === 1
+            ? recordValueSchemas[0]
+            : `Schema.Union([${recordValueSchemas.join(", ")}])`
 
     if (!hasProperties && recordValue) {
       const base = `Schema.Record(${keySchema}, ${recordValue})`
       return withFormatWarning(base)
     }
 
-    const recordExpr = recordValue
-      ? `Schema.Record(${keySchema}, ${recordValue})`
-      : undefined
+    const recordExpr = recordValue ? `Schema.Record(${keySchema}, ${recordValue})` : undefined
     const base = formatStruct(fields, recordExpr)
     return withFormatWarning(base)
   }
@@ -447,6 +448,53 @@ const inferResponseKind = (contentType?: string, schema?: OpenApiSchema) => {
   return "json" as const
 }
 
+const collectComponentRefs = (value: unknown, refs: Set<string>): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) collectComponentRefs(item, refs)
+    return
+  }
+  if (typeof value !== "object" || value === null) return
+  const record = value as Record<string, unknown>
+  const ref = record.$ref
+  if (typeof ref === "string") {
+    const match = ref.match(/^#\/components\/schemas\/(.+)$/)
+    if (match?.[1] !== undefined) refs.add(match[1])
+  }
+  for (const child of Object.values(record)) collectComponentRefs(child, refs)
+}
+
+const findRecursiveComponents = (components: Record<string, OpenApiSchema>) => {
+  const dependencies = new Map<string, Set<string>>()
+  for (const [name, schema] of Object.entries(components)) {
+    const refs = new Set<string>()
+    collectComponentRefs(schema, refs)
+    dependencies.set(name, refs)
+  }
+
+  const recursive = new Set<string>()
+  const visited = new Set<string>()
+  const visiting = new Map<string, number>()
+  const stack: string[] = []
+  const visit = (name: string): void => {
+    const cycleStart = visiting.get(name)
+    if (cycleStart !== undefined) {
+      for (const cycleName of stack.slice(cycleStart)) recursive.add(cycleName)
+      return
+    }
+    if (visited.has(name)) return
+    visiting.set(name, stack.length)
+    stack.push(name)
+    for (const dependency of dependencies.get(name) ?? []) {
+      if (components[dependency] !== undefined) visit(dependency)
+    }
+    stack.pop()
+    visiting.delete(name)
+    visited.add(name)
+  }
+  for (const name of Object.keys(components)) visit(name)
+  return recursive
+}
+
 const generateSchemas = (
   spec: NormalizedSpec,
   componentNames: Map<string, string>,
@@ -467,6 +515,7 @@ const generateSchemas = (
     moduleSpecifier: "effect"
   })
 
+  const recursiveComponents = findRecursiveComponents(spec.components)
   for (const [key, schema] of Object.entries(spec.components).sort(([a], [b]) =>
     a.localeCompare(b)
   )) {
@@ -476,7 +525,15 @@ const generateSchemas = (
     sourceFile.addVariableStatement({
       isExported: true,
       declarationKind: VariableDeclarationKind.Const,
-      declarations: [{ name, initializer: expression }]
+      declarations: [
+        {
+          name,
+          type: recursiveComponents.has(key)
+            ? "Schema.ConstraintDecoder<unknown, never>"
+            : undefined,
+          initializer: expression
+        }
+      ]
     })
     sourceFile.addTypeAlias({
       isExported: true,
@@ -641,11 +698,14 @@ const generateClient = (
     ].join("\n"),
     true
   )
-  addTypeAlias("SchemaType<S extends Schema.Codec<unknown>>", "S[\"Type\"]")
+  addTypeAlias("SchemaType<S extends Schema.ConstraintDecoder<unknown, never>>", 'S["Type"]')
   addTypeAlias("ResponseKind", '"json" | "text" | "empty" | "binary" | "stream"')
   addTypeAlias("StreamValue", "ReadableStream<Uint8Array> | null")
   addTypeAlias("BinaryValue", "ArrayBuffer")
-  addTypeAlias("ResponseEntry", "{ schema: Schema.Codec<unknown>; kind: ResponseKind }")
+  addTypeAlias(
+    "ResponseEntry",
+    "{ schema: Schema.ConstraintDecoder<unknown, never>; kind: ResponseKind }"
+  )
   addTypeAlias(
     "ResponseValue<T extends ResponseEntry>",
     'T["kind"] extends "stream" ? StreamValue : T["kind"] extends "binary" ? BinaryValue : SchemaType<T["schema"]>'
@@ -677,7 +737,7 @@ const generateClient = (
   const securitySchemeEntries = Object.entries(spec.securitySchemes)
   if (securitySchemeEntries.length > 0) {
     const securityFields = securitySchemeEntries
-      .map(([name]) => `  ${quoteKey(name)}: SecurityScheme`)
+      .map(([name, scheme]) => `  ${quoteKey(name)}: ${JSON.stringify(scheme)}`)
       .join(",\n")
     addConst(
       "securitySchemes",
@@ -788,7 +848,7 @@ ${securityFields}
       '  if (auth.in === "header") {',
       "    nextHeaders[auth.name] = auth.value",
       "  } else {",
-      "    nextQuery = { ...(nextQuery ?? {}), [auth.name]: auth.value }",
+      "    nextQuery = { ...nextQuery, [auth.name]: auth.value }",
       "  }",
       "}",
       "return { headers: nextHeaders, query: nextQuery }"
@@ -912,84 +972,11 @@ ${securityFields}
     ],
     returnType: "Record<string, string>",
     statements: [
-      "const headers: Record<string, string> = { ...(base ?? {}), ...(extra ?? {}) }",
+      "const headers: Record<string, string> = { ...base, ...extra }",
       'if (hasBody && contentType && !contentType.toLowerCase().includes("multipart/form-data")) {',
       '  headers["content-type"] = contentType',
       "}",
       "return headers"
-    ]
-  })
-  addFunction({
-    name: "encodeFormData",
-    parameters: [{ name: "body", type: "unknown" }],
-    returnType: "FormData",
-    statements: [
-      'if (typeof FormData === "undefined") {',
-      '  throw new Error("FormData is not available in this runtime")',
-      "}",
-      "if (body instanceof FormData) return body",
-      'if (!body || typeof body !== "object" || Array.isArray(body)) {',
-      '  throw new Error("multipart/form-data body must be an object")',
-      "}",
-      "const form = new FormData()",
-      "for (const [key, value] of Object.entries(body as Record<string, unknown>)) {",
-      "  if (value === undefined) continue",
-      "  if (Array.isArray(value)) {",
-      "    for (const item of value) {",
-      "      if (item === undefined) continue",
-      "      if (item === null) {",
-      '        form.append(key, "")',
-      "        continue",
-      "      }",
-      '      if (typeof Blob !== "undefined" && item instanceof Blob) {',
-      "        form.append(key, item)",
-      "        continue",
-      "      }",
-      '      if (typeof item === "object") {',
-      "        form.append(key, JSON.stringify(item))",
-      "        continue",
-      "      }",
-      "      form.append(key, String(item))",
-      "    }",
-      "    continue",
-      "  }",
-      "  if (value === null) {",
-      '    form.append(key, "")',
-      "    continue",
-      "  }",
-      '  if (typeof Blob !== "undefined" && value instanceof Blob) {',
-      "    form.append(key, value)",
-      "    continue",
-      "  }",
-      '  if (typeof value === "object") {',
-      "    form.append(key, JSON.stringify(value))",
-      "    continue",
-      "  }",
-      "  form.append(key, String(value))",
-      "}",
-      "return form"
-    ]
-  })
-  addFunction({
-    name: "encodeBody",
-    parameters: [
-      { name: "body", type: "unknown" },
-      { name: "contentType?", type: "string" }
-    ],
-    returnType: "BodyInit | undefined",
-    statements: [
-      "if (body === undefined) return undefined",
-      "const normalized = contentType?.toLowerCase()",
-      'if (normalized && normalized.includes("multipart/form-data")) {',
-      "  return encodeFormData(body)",
-      "}",
-      'if (!normalized || normalized.includes("application/json")) {',
-      "  return JSON.stringify(body)",
-      "}",
-      'if (normalized.startsWith("text/")) {',
-      "  return String(body)",
-      "}",
-      "return JSON.stringify(body)"
     ]
   })
   addFunction({
@@ -1001,7 +988,7 @@ ${securityFields}
       { name: "headers", type: "Record<string, string>" },
       { name: "body?", type: "BodyInit" }
     ],
-    returnType: "Effect.Effect<Response, ClientError, unknown>",
+    returnType: "Effect.Effect<Response, ClientError, never>",
     statements: [
       "return Effect.tryPromise({",
       "  try: () => fetcher(url, { method, headers, body }),",
@@ -1011,12 +998,12 @@ ${securityFields}
   })
   addFunction({
     name: "decodeInput",
-    typeParameters: ["S extends Schema.Codec<unknown>"],
+    typeParameters: ["S extends Schema.ConstraintDecoder<unknown, never>"],
     parameters: [
       { name: "schema", type: "S" },
       { name: "input", type: "unknown" }
     ],
-    returnType: "Effect.Effect<S[\"Type\"], ClientError, unknown>",
+    returnType: 'Effect.Effect<S["Type"], ClientError, never>',
     statements: [
       "return Schema.decodeUnknownEffect(schema)(input).pipe(",
       '  Effect.mapError((error) => ({ _tag: "InputError" as const, error }))',
@@ -1031,8 +1018,7 @@ ${securityFields}
       { name: "successSpec", type: "TSuccess" },
       { name: "errorSpec?", type: "TError" }
     ],
-    returnType:
-      "Effect.Effect<ResponseUnion<TSuccess>, ClientError | ErrorChannel<TError>, unknown>",
+    returnType: "Effect.Effect<ResponseUnion<TSuccess>, ClientError | ErrorChannel<TError>, never>",
     statements: [
       "return Effect.tryPromise({",
       "  try: async () => {",
@@ -1330,6 +1316,81 @@ ${errorEntries}
       effectBody: applyResilienceBlock
     })
   }
+  if (spec.operations.some((operation) => operation.requestBody !== undefined)) {
+    addFunction({
+      name: "encodeFormData",
+      parameters: [{ name: "body", type: "unknown" }],
+      returnType: "FormData",
+      statements: [
+        'if (typeof FormData === "undefined") {',
+        '  throw new Error("FormData is not available in this runtime")',
+        "}",
+        "if (body instanceof FormData) return body",
+        'if (!body || typeof body !== "object" || Array.isArray(body)) {',
+        '  throw new Error("multipart/form-data body must be an object")',
+        "}",
+        "const form = new FormData()",
+        "for (const [key, value] of Object.entries(body as Record<string, unknown>)) {",
+        "  if (value === undefined) continue",
+        "  if (Array.isArray(value)) {",
+        "    for (const item of value) {",
+        "      if (item === undefined) continue",
+        "      if (item === null) {",
+        '        form.append(key, "")',
+        "        continue",
+        "      }",
+        '      if (typeof Blob !== "undefined" && item instanceof Blob) {',
+        "        form.append(key, item)",
+        "        continue",
+        "      }",
+        '      if (typeof item === "object") {',
+        "        form.append(key, JSON.stringify(item))",
+        "        continue",
+        "      }",
+        "      form.append(key, String(item))",
+        "    }",
+        "    continue",
+        "  }",
+        "  if (value === null) {",
+        '    form.append(key, "")',
+        "    continue",
+        "  }",
+        '  if (typeof Blob !== "undefined" && value instanceof Blob) {',
+        "    form.append(key, value)",
+        "    continue",
+        "  }",
+        '  if (typeof value === "object") {',
+        "    form.append(key, JSON.stringify(value))",
+        "    continue",
+        "  }",
+        "  form.append(key, String(value))",
+        "}",
+        "return form"
+      ]
+    })
+    addFunction({
+      name: "encodeBody",
+      parameters: [
+        { name: "body", type: "unknown" },
+        { name: "contentType?", type: "string" }
+      ],
+      returnType: "BodyInit | undefined",
+      statements: [
+        "if (body === undefined) return undefined",
+        "const normalized = contentType?.toLowerCase()",
+        'if (normalized && normalized.includes("multipart/form-data")) {',
+        "  return encodeFormData(body)",
+        "}",
+        'if (!normalized || normalized.includes("application/json")) {',
+        "  return JSON.stringify(body)",
+        "}",
+        'if (normalized.startsWith("text/")) {',
+        "  return String(body)",
+        "}",
+        "return JSON.stringify(body)"
+      ]
+    })
+  }
 
   // Generate makeClient (backward compatible - all operations)
   const makeClientBody = [
@@ -1388,7 +1449,7 @@ ${indentLines(tagClientBody, "    ")}
     }
 
     const makeClientsBody = [
-      "(config: ClientConfig) => {",
+      "(_config: ClientConfig) => {",
       indentLines(`return {\n${indentLines(tagEntries.join(",\n"), "  ")}\n}`, "  "),
       "}"
     ].join("\n")

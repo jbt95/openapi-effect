@@ -1,6 +1,6 @@
 # openapi-effect
 
-Generate type-safe Effect Schema and HTTP clients from OpenAPI 3.0/3.1 specifications.
+Generate type-safe Effect Schema and HTTP clients from OpenAPI 4.0 specifications.
 
 [![npm version](https://img.shields.io/npm/v/openapi-effect.svg)](https://www.npmjs.com/package/openapi-effect)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -21,8 +21,10 @@ npm install openapi-effect
 
 # Generate from OpenAPI spec
 npx openapi-effect generate --input ./api.yaml --output ./src/generated
+```
 
-# Use the generated client
+```typescript
+import { Effect } from "effect"
 import { makeClient } from "./src/generated/client.js"
 
 const client = makeClient({ baseUrl: "https://api.example.com" })
@@ -47,13 +49,22 @@ pnpm add openapi-effect
 
 ```bash
 openapi-effect generate --input <path-or-url> --output <dir>
+
+# Generate only schemas
+openapi-effect generate -i ./openapi.json --schemas-only
+
+# Generate only client
+openapi-effect generate -i ./openapi.json --client-only
+
+# Use custom format mappings
+openapi-effect generate -i ./openapi.json --format-map ./format-map.json
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-i, --input` | OpenAPI 3.0/3.1 file path or URL |
+| `-i, --input` | OpenAPI 4.0 file path or URL |
 | `-o, --output` | Output directory (default: `src/generated`) |
 | `--schemas-only` | Only generate `schemas.ts` |
 | `--client-only` | Only generate `client.ts` |
@@ -66,8 +77,8 @@ import { generateFromOpenApi } from "openapi-effect"
 
 const { schemas, client, warnings } = await generateFromOpenApi("./openapi.json", {
   formatMap: {
-    uuid: "Schema.UUID",
-    "date-time": "Schema.Date"
+    uuid: "Schema.String.check(Schema.isUUID())",
+    "date-time": "Schema.DateFromString"
   }
 })
 ```
@@ -127,6 +138,14 @@ Generated types:
 - `<Operation>Response` - Union of success and error
 - `<Operation>Failure` - `HttpError` type for the error channel
 
+Common client error tags:
+- `InputError`
+- `RequestError`
+- `ResponseError`
+- `ResponseDecodeError`
+- `InterceptorError`
+- `TimeoutError`
+
 ### Request/Response Interceptors
 
 ```typescript
@@ -170,6 +189,8 @@ makeClient({
 })
 ```
 
+Note: auth is configured per client instance via `makeClient({ auth: ... })`. Operation-specific security rules from the spec are normalized and exported as `securitySchemes`, but auth application is controlled by runtime config.
+
 ### Retries and Timeouts
 
 ```typescript
@@ -189,18 +210,20 @@ const client = makeClient({
 
 ### Tag-Based Client Grouping
 
-For large APIs, use `makeClients` to get clients organized by OpenAPI tags:
+For large APIs, generated output also includes `makeClients`, which groups operations by OpenAPI tag:
 
 ```typescript
 import { makeClients } from "./generated/client.js"
 
-const { users, orders, inventory } = makeClients({
+const grouped = makeClients({
   baseUrl: "https://api.example.com"
 })
 
-// Each group contains only the operations for that tag
-const user = await Effect.runPromise(users.getUser({ path: { id: "123" } }))
-const order = await Effect.runPromise(orders.createOrder({ body: { ... } }))
+const usersClient = grouped.users({ baseUrl: "https://api.example.com" })
+const ordersClient = grouped.orders({ baseUrl: "https://api.example.com" })
+
+const user = await Effect.runPromise(usersClient.getUser({ path: { id: "123" } }))
+const order = await Effect.runPromise(ordersClient.createOrder({ body: { ... } }))
 ```
 
 ## Supported OpenAPI Features
@@ -232,7 +255,7 @@ const order = await Effect.runPromise(orders.createOrder({ body: { ... } }))
 - ✅ Binary responses (`application/octet-stream`, images, audio, video)
 - ✅ Streaming responses (`text/event-stream`, Server-Sent Events)
 - ✅ Global and per-operation server URLs
-- ✅ Per-operation security requirements
+- ✅ Exported OpenAPI security schemes (`securitySchemes`)
 
 ## Configuration
 
@@ -243,14 +266,19 @@ Map OpenAPI format strings to Effect Schema types:
 ```typescript
 const { schemas, client } = await generateFromOpenApi("./openapi.json", {
   formatMap: {
-    email: "Schema.Email",
-    uri: "Schema.URL",
-    uuid: "Schema.UUID",
+    email: "Schema.String",
+    uri: "Schema.String",
+    uuid: "Schema.String.check(Schema.isUUID())",
     "date-time": "Schema.DateFromString"
   },
   warnOnUnknownFormat: true  // Warn about unmapped formats
 })
 ```
+
+Default format mappings used by the generator:
+- `uuid` -> `Schema.String.check(Schema.isUUID())`
+- `date-time` -> `Schema.DateFromString`
+- `date` -> `Schema.DateFromString`
 
 ## API Reference
 
@@ -272,6 +300,15 @@ Generate schemas and client from an OpenAPI specification file or URL.
 ### `generateFromSpec(spec, options?)`
 
 Same as above but accepts a parsed OpenAPI specification object.
+
+Returns synchronously: `GenerateResult`.
+
+## Notes and Limitations
+
+- `allOf` is only fully merged for inline object schemas.
+- `patternProperties` and `propertyNames` are approximated for compatibility.
+- `if` / `then` / `else` and `unevaluatedProperties` are approximated and emit warnings.
+- Unsupported schema `format` values fall back to base schema types and can emit warnings.
 
 ## Development
 

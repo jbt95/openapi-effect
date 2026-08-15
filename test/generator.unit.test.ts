@@ -323,6 +323,8 @@ describe("generateFromSpec", () => {
     }
 
     const result = generateFromSpec(spec)
+    expect(result.client).not.toContain("function encodeBody")
+    expect(result.client).toContain("(_config: ClientConfig)")
 
     expect(result.client).toContain("export const makeClients")
     expect(result.client).toContain("users:")
@@ -364,6 +366,37 @@ describe("generateFromSpec", () => {
     expect(result.client).toContain("export type OperationConfig")
   })
 
+  it("handles recursive schemas and closed objects", () => {
+    const spec: OpenApiSpec = {
+      openapi: "3.0.0",
+      components: {
+        schemas: {
+          Node: {
+            type: "object",
+            properties: {
+              children: {
+                type: "array",
+                items: { $ref: "#/components/schemas/Node" }
+              }
+            }
+          },
+          Closed: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            additionalProperties: false
+          }
+        }
+      },
+      paths: {}
+    }
+
+    const result = generateFromSpec(spec)
+
+    expect(result.schemas).toContain("export const Node: Schema.ConstraintDecoder<unknown, never>")
+    expect(result.schemas).toContain("export const Closed = Schema.Struct")
+    expect(result.schemas).not.toContain("Schema.Union([])")
+  })
+
   it("exports SecurityScheme type and securitySchemes", () => {
     const spec: OpenApiSpec = {
       openapi: "3.0.0",
@@ -396,5 +429,8 @@ describe("generateFromSpec", () => {
     expect(result.client).toContain("export const securitySchemes")
     expect(result.client).toContain("bearerAuth")
     expect(result.client).toContain("apiKey")
+    expect(result.client).toContain('bearerAuth: {"type":"http","scheme":"bearer"}')
+    expect(result.client).not.toContain("bearerAuth: SecurityScheme")
+    expect(result.client).toContain("Effect.Effect<Response, ClientError, never>")
   })
 })
