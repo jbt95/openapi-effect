@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "useTabs": false,
+  "tabWidth": 2,
+  "semi": false,
+  "singleQuote": false,
+  "trailingComma": "none",
+  "endOfLine": "lf",
+  "insertFinalNewline": true,
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "src/generated/**",
+    "test/fixtures/generated/**",
+    "tools/oxlint/better-antislop/**"
+  ]
+}

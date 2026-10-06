@@ -1,11 +1,37 @@
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { generateFromOpenApi } from "../src/index.js"
+import { generateFromOpenApi, generateFromSpec } from "../../src/index.js"
+import type { OpenApiSpec } from "../../src/openapi.js"
 
-const fixturePath = fileURLToPath(new URL("../fixtures/simple.json", import.meta.url))
-const complexFixturePath = fileURLToPath(new URL("../fixtures/complex.json", import.meta.url))
+const fixturePath = fileURLToPath(new URL("../../fixtures/simple.json", import.meta.url))
+
+const complexFixturePath = fileURLToPath(new URL("../../fixtures/complex.json", import.meta.url))
+
 const jiraSpecUrl =
   "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json?_v=1.8516.81"
+
+describe("generateFromSpec", () => {
+  it("generates schema and client output from a parsed spec", () => {
+    const spec: OpenApiSpec = {
+      openapi: "3.0.0",
+      components: { schemas: { User: { type: "object", properties: { id: { type: "string" } } } } },
+      paths: {
+        "/users": {
+          get: {
+            operationId: "listUsers",
+            responses: { "200": { description: "OK" } }
+          }
+        }
+      }
+    }
+
+    const result = generateFromSpec(spec)
+
+    expect(result.schemas).toContain("export const User = Schema.Struct")
+    expect(result.client).toContain("listUsers")
+    expect(result.warnings).toEqual([])
+  })
+})
 
 describe("generateFromOpenApi", () => {
   it("generates schema and client outputs", async () => {

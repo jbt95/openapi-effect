@@ -5,9 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Upgrade the Effect dependency and documentation examples to v4.
+- Pass Effect interruption signals to generated fetch requests.
+- Report request preparation failures as typed `InputError` values.
+- Limit default retries to idempotent methods.
+
 ## [0.1.0] - 2026-01-30
 
 ### Added
+
 - Initial release
 - OpenAPI 3.0.x and 3.1.x support
 - Generate Effect Schema from OpenAPI schemas

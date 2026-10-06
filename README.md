@@ -42,6 +42,7 @@ pnpm add openapi-effect
 ```
 
 **Requirements:**
+
 - Node.js >= 18.0.0
 - TypeScript >= 5.0
 
@@ -62,13 +63,13 @@ openapi-effect generate -i ./openapi.json --format-map ./format-map.json
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `-i, --input` | OpenAPI 4.0 file path or URL |
-| `-o, --output` | Output directory (default: `src/generated`) |
-| `--schemas-only` | Only generate `schemas.ts` |
-| `--client-only` | Only generate `client.ts` |
-| `--format-map` | Path to JSON mapping custom formats |
+| Option           | Description                                 |
+| ---------------- | ------------------------------------------- |
+| `-i, --input`    | OpenAPI 4.0 file path or URL                |
+| `-o, --output`   | Output directory (default: `src/generated`) |
+| `--schemas-only` | Only generate `schemas.ts`                  |
+| `--client-only`  | Only generate `client.ts`                   |
+| `--format-map`   | Path to JSON mapping custom formats         |
 
 ## Programmatic API
 
@@ -100,7 +101,7 @@ const client = makeClient({
 
 // Fully typed - TypeScript knows the exact shape of inputs and outputs
 const effect = client.getUser({
-  path: { userId: "123" },        // Required path params
+  path: { userId: "123" }, // Required path params
   query: { include: ["profile"] }, // Optional query params
   headers: { "x-request-id": "abc" }
 })
@@ -114,18 +115,17 @@ const result = await Effect.runPromise(effect)
 Every operation exposes discriminated types for success and error cases:
 
 ```typescript
-import { makeClient, type GetUserSuccess, type GetUserFailure } from "./generated/client.js"
+import { Effect } from "effect"
+import { makeClient } from "./generated/client.js"
 
+const client = makeClient({ baseUrl: "https://api.example.com" })
 const result = await Effect.runPromise(
   client.getUser({ path: { userId: "123" } }).pipe(
-    Effect.catchAll((error) => {
+    Effect.catch((error) => {
       if (error._tag === "HttpError") {
-        const failure = error as GetUserFailure
-        // Typed access to error responses (404, 500, etc.)
-        console.log(failure.response.status)
+        console.log(error.response.status)
         return Effect.succeed(null)
       }
-      // Handle other errors (timeouts, network errors, etc.)
       return Effect.fail(error)
     })
   )
@@ -133,12 +133,14 @@ const result = await Effect.runPromise(
 ```
 
 Generated types:
+
 - `<Operation>Success` - 2xx responses with status as literal types
 - `<Operation>Error` - Non-2xx responses with status as literal types
 - `<Operation>Response` - Union of success and error
 - `<Operation>Failure` - `HttpError` type for the error channel
 
 Common client error tags:
+
 - `InputError`
 - `RequestError`
 - `ResponseError`
@@ -153,14 +155,13 @@ const client = makeClient({
   baseUrl: "https://api.example.com",
   interceptors: {
     request: [
-      (req) => Effect.succeed({
-        ...req,
-        headers: { ...req.headers, "x-trace-id": generateTraceId() }
-      })
+      (req) =>
+        Effect.succeed({
+          ...req,
+          headers: { ...req.headers, "x-trace-id": generateTraceId() }
+        })
     ],
-    response: [
-      (res, req) => Effect.succeed(res)
-    ]
+    response: [(res, req) => Effect.succeed(res)]
   }
 })
 ```
@@ -196,17 +197,17 @@ Note: auth is configured per client instance via `makeClient({ auth: ... })`. Op
 ```typescript
 const client = makeClient({
   baseUrl: "https://api.example.com",
-  timeoutMs: 3000,           // Per-request timeout
+  timeoutMs: 3000,
   retry: {
-    times: 3,                // Max retry attempts
-    delayMs: 200,            // Delay between retries
-    while: (error) => {      // Retry condition
-      return error._tag === "TimeoutError" ||
-             (error._tag === "HttpError" && error.response.status >= 500)
-    }
+    times: 3,
+    delayMs: 200
   }
 })
 ```
+
+`times` counts retries after the first attempt. `timeoutMs` applies to each attempt. Retries and delays can extend the total call time.
+
+By default, retries apply to `GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, and `TRACE` operations. `POST` and `PATCH` operations need a custom `while` predicate to retry. This predicate replaces the default method and error policy, so use it only when repeating the request is safe.
 
 ### Tag-Based Client Grouping
 
@@ -229,6 +230,7 @@ const order = await Effect.runPromise(ordersClient.createOrder({ body: { ... } }
 ## Supported OpenAPI Features
 
 ### Schema Features
+
 - ✅ `$ref` references to `#/components/schemas/*`
 - ✅ All primitive types: `string`, `number`, `integer`, `boolean`, `array`, `object`
 - ✅ `type` arrays (e.g., `["string", "null"]`) - OpenAPI 3.1
@@ -247,6 +249,7 @@ const order = await Effect.runPromise(ordersClient.createOrder({ body: { ... } }
 - ✅ `contentEncoding` / `contentMediaType` (treated as string with warning)
 
 ### HTTP Features
+
 - ✅ Path, query, header parameters
 - ✅ Request/response body validation
 - ✅ JSON request/response bodies
@@ -271,11 +274,12 @@ const { schemas, client } = await generateFromOpenApi("./openapi.json", {
     uuid: "Schema.String.check(Schema.isUUID())",
     "date-time": "Schema.DateFromString"
   },
-  warnOnUnknownFormat: true  // Warn about unmapped formats
+  warnOnUnknownFormat: true // Warn about unmapped formats
 })
 ```
 
 Default format mappings used by the generator:
+
 - `uuid` -> `Schema.String.check(Schema.isUUID())`
 - `date-time` -> `Schema.DateFromString`
 - `date` -> `Schema.DateFromString`
@@ -287,12 +291,14 @@ Default format mappings used by the generator:
 Generate schemas and client from an OpenAPI specification file or URL.
 
 **Parameters:**
+
 - `input: string` - Path to OpenAPI file or URL
 - `options?: GenerateOptions`
   - `formatMap?: Record<string, string>` - Map OpenAPI formats to Schema types
   - `warnOnUnknownFormat?: boolean` - Warn about unmapped formats (default: true)
 
 **Returns:** `Promise<GenerateResult>`
+
 - `schemas: string` - Generated schema TypeScript code
 - `client: string` - Generated client TypeScript code
 - `warnings: string[]` - Any warnings during generation

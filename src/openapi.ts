@@ -134,20 +134,24 @@ export type NormalizedSpec = {
 }
 
 const httpMethods = ["get", "post", "put", "patch", "delete", "head", "options", "trace"] as const
-type HttpMethod = (typeof httpMethods)[number]
 
 const pickContent = (content?: Record<string, { schema?: OpenApiSchema }>) => {
   if (!content) return undefined
+
   if (content["application/json"]) {
     return { contentType: "application/json", schema: content["application/json"].schema }
   }
+
   const firstType = Object.keys(content)[0]
+
   if (!firstType) return undefined
+
   return { contentType: firstType, schema: content[firstType]?.schema }
 }
 
 const isJsonContentType = (contentType: string) => {
   const normalized = contentType.toLowerCase()
+
   return normalized.includes("application/json") || normalized.endsWith("+json")
 }
 
@@ -158,6 +162,7 @@ const isMultipartContentType = (contentType: string) =>
 
 const isBinaryContentType = (contentType: string) => {
   const normalized = contentType.toLowerCase()
+
   return (
     normalized === "application/octet-stream" ||
     normalized.startsWith("image/") ||
@@ -177,11 +182,14 @@ const isSupportedResponseContentType = (contentType: string) =>
 const ensureUniqueName = (base: string, used: Set<string>) => {
   let name = base
   let index = 1
+
   while (used.has(name)) {
     index += 1
     name = `${base}${index}`
   }
+
   used.add(name)
+
   return name
 }
 
@@ -190,7 +198,9 @@ const inferOperationId = (method: string, path: string) => {
     .replace(/[{}]/g, " ")
     .split(/[^a-zA-Z0-9]+/)
     .filter(Boolean)
+
   const base = [method, ...segments].join(" ")
+
   return toCamelIdentifier(base)
 }
 
@@ -208,121 +218,221 @@ const resolveServerUrl = (server: OpenApiServer): string => {
 
 export const loadOpenApi = async (input: string): Promise<OpenApiSpec> => {
   const parser = new SwaggerParser()
+  const parsed = await parser.parse(input)
 
-  return (await parser.parse(input)) as OpenApiSpec
+  // SAFETY: SwaggerParser validates and dereferences the OpenAPI document; this type models its supported subset.
+  return parsed as OpenApiSpec
+}
+
+const warnIgnoredCookieParameter = (
+  operationId: string,
+  name: string,
+  warnings: string[]
+): void => {
+  warnings.push(
+    `Operation ${operationId} uses cookie parameters which are currently ignored (${name}).`
+  )
+}
+
+const addNormalizedParameter = (
+  param: OpenApiParameter,
+  operationId: string,
+  normalized: NormalizedOperation["params"],
+  warnings: string[]
+): void => {
+  if (!param || !param.name || !param.in) return
+
+  if (param.in === "cookie") {
+    warnIgnoredCookieParameter(operationId, param.name, warnings)
+
+    return
+  }
+
+  normalized[param.in].push({
+    name: param.name,
+    required: param.in === "path" || Boolean(param.required),
+    schema: param.schema
+  })
+}
+
+const normalizeParameters = (
+  params: OpenApiParameter[],
+  operationId: string,
+  warnings: string[]
+): NormalizedOperation["params"] => {
+  const normalized: NormalizedOperation["params"] = { path: [], query: [], header: [] }
+
+  for (const param of params) {
+    addNormalizedParameter(param, operationId, normalized, warnings)
+  }
+
+  return normalized
+}
+
+const normalizeRequestBody = (
+  operation: OpenApiOperation,
+  operationId: string,
+  warnings: string[]
+): NormalizedRequestBody | undefined => {
+  const content = pickContent(operation.requestBody?.content)
+
+  if (!content) return undefined
+
+  if (content.contentType && !isSupportedRequestContentType(content.contentType)) {
+    warnings.push(
+      `Operation ${operationId} uses request content type ${content.contentType}; only JSON and multipart/form-data are fully supported.`
+    )
+  }
+
+  return {
+    required: Boolean(operation.requestBody?.required),
+    schema: content.schema,
+    contentType: content.contentType
+  }
+}
+
+const normalizeResponses = (
+  operation: OpenApiOperation,
+  operationId: string,
+  warnings: string[]
+): NormalizedResponse[] => {
+  const entries = Object.entries(operation.responses ?? {})
+  const responses: NormalizedResponse[] = []
+
+  if (entries.length === 0) warnings.push(`Operation ${operationId} has no responses defined.`)
+
+  for (const [status, response] of entries) {
+    const content = pickContent(response?.content)
+
+    if (content?.contentType && !isSupportedResponseContentType(content.contentType)) {
+      warnings.push(
+        `Operation ${operationId} response ${status} uses content type ${content.contentType}; only JSON, text, and binary streams are fully supported.`
+      )
+    }
+
+    responses.push({
+      status,
+      schema: content?.schema,
+      contentType: content?.contentType
+    })
+  }
+
+  return responses
+}
+
+const normalizeOperationId = (
+  operation: OpenApiOperation,
+  method: (typeof httpMethods)[number],
+  path: string,
+  usedOperationIds: Set<string>
+): string => {
+  const rawId = operation.operationId ?? inferOperationId(method, path)
+
+  return ensureUniqueName(toCamelIdentifier(rawId), usedOperationIds)
+}
+
+const resolveOperationBaseUrl = (
+  operation: OpenApiOperation,
+  pathBaseUrl: string | undefined,
+  globalBaseUrl: string | undefined
+): string | undefined =>
+  operation.servers?.[0] ? resolveServerUrl(operation.servers[0]) : (pathBaseUrl ?? globalBaseUrl)
+
+const normalizeOperation = (
+  method: (typeof httpMethods)[number],
+  path: string,
+  pathItem: OpenApiPathItem,
+  operation: OpenApiOperation,
+  pathBaseUrl: string | undefined,
+  globalBaseUrl: string | undefined,
+  usedOperationIds: Set<string>,
+  warnings: string[]
+): NormalizedOperation => {
+  const id = normalizeOperationId(operation, method, path, usedOperationIds)
+
+  return {
+    id,
+    method,
+    path,
+    tags: operation.tags ?? [],
+    baseUrl: resolveOperationBaseUrl(operation, pathBaseUrl, globalBaseUrl),
+    params: normalizeParameters(
+      [...(pathItem.parameters ?? []), ...(operation.parameters ?? [])],
+      id,
+      warnings
+    ),
+    requestBody: normalizeRequestBody(operation, id, warnings),
+    responses: normalizeResponses(operation, id, warnings),
+    security: operation.security
+  }
+}
+
+const normalizePathItemOperations = (
+  path: string,
+  pathItem: OpenApiPathItem,
+  globalBaseUrl: string | undefined,
+  usedOperationIds: Set<string>,
+  warnings: string[]
+): NormalizedOperation[] => {
+  const pathBaseUrl = pathItem.servers?.[0] ? resolveServerUrl(pathItem.servers[0]) : undefined
+  const operations: NormalizedOperation[] = []
+
+  for (const method of httpMethods) {
+    const operation = pathItem[method]
+
+    if (!operation) continue
+
+    operations.push(
+      normalizeOperation(
+        method,
+        path,
+        pathItem,
+        operation,
+        pathBaseUrl,
+        globalBaseUrl,
+        usedOperationIds,
+        warnings
+      )
+    )
+  }
+
+  return operations
+}
+
+const normalizePaths = (
+  paths: Record<string, OpenApiPathItem>,
+  globalBaseUrl: string | undefined,
+  usedOperationIds: Set<string>,
+  warnings: string[]
+): NormalizedOperation[] => {
+  const operations: NormalizedOperation[] = []
+
+  for (const [path, pathItem] of Object.entries(paths)) {
+    if (!pathItem) continue
+
+    operations.push(
+      ...normalizePathItemOperations(path, pathItem, globalBaseUrl, usedOperationIds, warnings)
+    )
+  }
+
+  return operations
+}
+
+const ensureSupportedVersion = (version: string): void => {
+  if (version.startsWith("3.0") || version.startsWith("3.1")) return
+
+  throw new Error(`Unsupported OpenAPI version: ${version || "unknown"}`)
 }
 
 export const normalizeOpenApi = (spec: OpenApiSpec): NormalizedSpec => {
   const warnings: string[] = []
-  const version = spec.openapi ?? ""
-  if (!version.startsWith("3.0") && !version.startsWith("3.1")) {
-    throw new Error(`Unsupported OpenAPI version: ${version || "unknown"}`)
-  }
+  ensureSupportedVersion(spec.openapi ?? "")
 
   const components = spec.components?.schemas ?? {}
-  const operations: NormalizedOperation[] = []
   const usedOperationIds = new Set<string>()
-
-  // Extract global baseUrl from first server
   const globalBaseUrl = spec.servers?.[0] ? resolveServerUrl(spec.servers[0]) : undefined
 
-  for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
-    if (!pathItem) continue
-    const commonParams = pathItem.parameters ?? []
-
-    // Check for per-path server (overrides global)
-    const pathBaseUrl = pathItem.servers?.[0] ? resolveServerUrl(pathItem.servers[0]) : undefined
-
-    for (const method of httpMethods) {
-      const operation = pathItem[method]
-      if (!operation) continue
-
-      const rawId = operation.operationId ?? inferOperationId(method, path)
-      const id = ensureUniqueName(toCamelIdentifier(rawId), usedOperationIds)
-
-      const params = [...commonParams, ...(operation.parameters ?? [])]
-      const normalizedParams = {
-        path: [] as NormalizedParameter[],
-        query: [] as NormalizedParameter[],
-        header: [] as NormalizedParameter[]
-      }
-
-      for (const param of params) {
-        if (!param || !param.name || !param.in) continue
-        const required = param.in === "path" ? true : Boolean(param.required)
-        const normalized: NormalizedParameter = {
-          name: param.name,
-          required,
-          schema: param.schema
-        }
-        if (param.in === "path") normalizedParams.path.push(normalized)
-        else if (param.in === "query") normalizedParams.query.push(normalized)
-        else if (param.in === "header") normalizedParams.header.push(normalized)
-        else if (param.in === "cookie") {
-          warnings.push(
-            `Operation ${id} uses cookie parameters which are currently ignored (${param.name}).`
-          )
-        }
-      }
-
-      const requestBodyContent = pickContent(operation.requestBody?.content)
-      const requestBody = requestBodyContent
-        ? {
-            required: Boolean(operation.requestBody?.required),
-            schema: requestBodyContent.schema,
-            contentType: requestBodyContent.contentType
-          }
-        : undefined
-
-      if (requestBody?.contentType && !isSupportedRequestContentType(requestBody.contentType)) {
-        warnings.push(
-          `Operation ${id} uses request content type ${requestBody.contentType}; only JSON and multipart/form-data are fully supported.`
-        )
-      }
-
-      const responses: NormalizedResponse[] = []
-      const responseEntries = Object.entries(operation.responses ?? {}) as Array<
-        [string, OpenApiResponse]
-      >
-      if (responseEntries.length === 0) {
-        warnings.push(`Operation ${id} has no responses defined.`)
-      }
-
-      for (const [status, response] of responseEntries) {
-        const responseContent = pickContent(response?.content)
-        if (
-          responseContent?.contentType &&
-          !isSupportedResponseContentType(responseContent.contentType)
-        ) {
-          warnings.push(
-            `Operation ${id} response ${status} uses content type ${responseContent.contentType}; only JSON, text, and binary streams are fully supported.`
-          )
-        }
-        responses.push({
-          status,
-          schema: responseContent?.schema,
-          contentType: responseContent?.contentType
-        })
-      }
-
-      // Determine baseUrl: operation-level > path-level > global
-      const operationBaseUrl = operation.servers?.[0]
-        ? resolveServerUrl(operation.servers[0])
-        : (pathBaseUrl ?? globalBaseUrl)
-
-      operations.push({
-        id,
-        method,
-        path,
-        tags: operation.tags ?? [],
-        baseUrl: operationBaseUrl,
-        params: normalizedParams,
-        requestBody,
-        responses,
-        security: operation.security
-      })
-    }
-  }
+  const operations = normalizePaths(spec.paths ?? {}, globalBaseUrl, usedOperationIds, warnings)
 
   return {
     components,

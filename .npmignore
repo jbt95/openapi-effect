@@ -6,7 +6,8 @@ fixtures/
 # Config files
 tsconfig.json
 vitest.config.ts
-.prettierrc.json
+.oxfmtrc.json
+oxlint.config.ts
 
 # Development
 node_modules/

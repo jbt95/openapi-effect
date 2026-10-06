@@ -6,20 +6,25 @@ const toWords = (value: string) => value.split(wordPattern).filter(Boolean)
 
 export const toPascalCase = (value: string) => {
   const words = toWords(value)
+
   if (words.length === 0) return "Unnamed"
+
   return words.map(capitalize).join("")
 }
 
 export const toCamelCase = (value: string) => {
   const pascal = toPascalCase(value)
+
   return pascal.charAt(0).toLowerCase() + pascal.slice(1)
 }
 
 export const toIdentifier = (value: string) => {
   let id = value.replace(/[^a-zA-Z0-9_]/g, "_")
+
   if (!/^[A-Za-z_]/.test(id)) {
     id = `_${id}`
   }
+
   return id
 }
 

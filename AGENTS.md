@@ -6,8 +6,11 @@
 # Install dependencies
 pnpm install
 
-# Type-check (no emit)
+# Type-check, lint, and format check
 pnpm check
+
+# Run Oxlint directly (loads the local TypeScript plugin source)
+pnpm lint
 
 # Build to dist/
 pnpm build
@@ -21,9 +24,14 @@ pnpm vitest run test/generator.unit.test.ts
 # Run tests in watch mode
 pnpm test:watch
 
-# Format code with Prettier
+# Format code with Oxfmt
 pnpm format
+
+# Check formatting without writing
+pnpm format:check
 ```
+
+`tools/oxlint/better-antislop/` is a vendored TypeScript source snapshot. Do not edit or format its contents directly. Keep `oxlint` and `@oxlint/plugins` pinned to the same exact version.
 
 ## Code Style Guidelines
 
@@ -34,7 +42,7 @@ pnpm format
 - Strict mode enabled
 - Declaration files and source maps generated
 
-### Formatting (Prettier)
+### Formatting (Oxfmt)
 
 - No semicolons
 - Double quotes

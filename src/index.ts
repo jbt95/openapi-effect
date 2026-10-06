@@ -1,2 +1,3 @@
-export { generateFromOpenApi, generateFromSpec } from "./generator.js"
-export type { GenerateOptions, GenerateResult } from "./generator.js"
+export { generateFromOpenApi, generateFromSpec } from "./generator/index.js"
+
+export type { GenerateOptions, GenerateResult } from "./generator/index.js"
