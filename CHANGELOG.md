@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Report request preparation failures as typed `InputError` values.
 - Limit default retries to idempotent methods.
 
+### Fixed
+
+- Generate valid Effect schemas for tuples with typed or unrestricted rest items.
+
 ## [0.1.0] - 2026-01-30
 
 ### Added

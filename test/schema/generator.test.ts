@@ -21,6 +21,11 @@ const prefixItemsSpec: OpenApiSpec = {
         prefixItems: [{ type: "string" }, { type: "integer" }],
         items: { type: "boolean" }
       },
+      TupleUnrestricted: {
+        type: "array",
+        prefixItems: [{ type: "string" }],
+        items: true
+      },
       TupleFixed: {
         type: "array",
         prefixItems: [{ type: "string" }],
@@ -156,7 +161,10 @@ it("supports prefixItems and tuple items", () => {
   const result = generateSchemasForSpec(spec)
 
   expect(result.code).toContain(
-    "export const TupleRest = Schema.TupleWithRest(Schema.Tuple([Schema.String, Schema.Number.check(Schema.isInt())]), Schema.Boolean)"
+    "export const TupleRest = Schema.TupleWithRest(Schema.Tuple([Schema.String, Schema.Number.check(Schema.isInt())]), [Schema.Boolean])"
+  )
+  expect(result.code).toContain(
+    "export const TupleUnrestricted = Schema.TupleWithRest(Schema.Tuple([Schema.String]), [Schema.Unknown])"
   )
   expect(result.code).toContain("export const TupleFixed = Schema.Tuple([Schema.String])")
   expect(result.code).toContain(

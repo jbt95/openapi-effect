@@ -240,7 +240,7 @@ const renderTupleItems = (
 }
 
 const renderTupleRest = (prefix: string[], rest: string): string =>
-  `Schema.TupleWithRest(Schema.Tuple([${prefix.join(", ")}]), ${rest})`
+  `Schema.TupleWithRest(Schema.Tuple([${prefix.join(", ")}]), [${rest}])`
 
 const renderTupleArray = (
   schema: OpenApiSchema,
